@@ -1,0 +1,20 @@
+name: mafia_game
+publish_to: "none"
+description: Flutter Mafia/Werewolf game with offline P2P and solo bots
+version: 0.1.0
+
+environment:
+  sdk: ">=2.17.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.0.5
+  # Nearby Connections plugin for Local Wi-Fi/Hotspot P2P
+  nearby_connections: ^3.2.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/background.png
