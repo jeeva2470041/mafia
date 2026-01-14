@@ -35,6 +35,9 @@ class LobbyScreenNew extends StatefulWidget {
 }
 
 class _LobbyScreenNewState extends State<LobbyScreenNew> {
+  final TextEditingController _chatController = TextEditingController();
+  bool _hasShownDisconnectDialog = false;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +45,7 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
 
   @override
   void dispose() {
+    _chatController.dispose();
     super.dispose();
   }
 
@@ -94,6 +98,40 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
     final manager = context.read<GameManager>();
     manager.leaveLANRoom();
     Navigator.popUntil(context, (route) => route.isFirst);
+  }
+
+  void _showDisconnectDialog(GameManager manager) {
+    if (_hasShownDisconnectDialog) return;
+    _hasShownDisconnectDialog = true;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppColors.error),
+            const SizedBox(width: 12),
+            const Text('DISCONNECTED'),
+          ],
+        ),
+        content: Text(
+          manager.disconnectReason ?? 'Connection to host was lost.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              manager.clearDisconnectState();
+              manager.leaveLANRoom();
+              Navigator.of(ctx).pop();
+              Navigator.popUntil(context, (route) => route.isFirst);
+            },
+            child: Text('OK', style: TextStyle(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
   }
 
   // Generate QR data string
@@ -247,6 +285,15 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
     final canStart = manager.canStartGame && widget.isHost;
     final localPlayerId = manager.localPlayerId;
 
+    // Handle disconnect
+    if (manager.wasDisconnected && !widget.isHost) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_hasShownDisconnectDialog) {
+          _showDisconnectDialog(manager);
+        }
+      });
+    }
+
     // Auto-navigate when game starts (for non-host)
     if (manager.phase != GamePhase.lobby && !widget.isHost) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -315,13 +362,24 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${manager.readyPlayerCount}/${players.length} READY',
+                            style: AppTextStyles.labelSmall.copyWith(
+                              color: manager.allPlayersReady
+                                  ? AppColors.success
+                                  : AppColors.warning,
+                            ),
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             canStart
                                 ? 'Ready to start'
                                 : players.length < 5
                                     ? 'Need at least 5 players'
-                                    : 'Waiting for host...',
+                                    : manager.allPlayersReady
+                                        ? 'Waiting for host...'
+                                        : 'Waiting for all to be ready...',
                             style: AppTextStyles.bodyMedium.copyWith(
                               color: canStart
                                   ? AppColors.success
@@ -441,7 +499,12 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
                       name: player.name,
                       isHost: isHost,
                       isYou: isYou,
-                      status: PlayerStatus.ready,
+                      status: player.isReady
+                          ? PlayerStatus.ready
+                          : PlayerStatus.waiting,
+                      subtitle: player.isBot
+                          ? 'BOT'
+                          : (player.isReady ? 'READY' : 'NOT READY'),
                       onTap: widget.isHost && !isYou
                           ? () => _showKickDialog(player)
                           : null,
@@ -453,39 +516,80 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
                 padding: const EdgeInsets.all(24),
                 child: widget.isHost
                     ? PrimaryButtonLarge(
-                        label: 'START GAME',
+                        label: canStart
+                            ? 'START GAME'
+                            : players.length < 5
+                                ? 'NEED ${5 - players.length} MORE'
+                                : 'WAITING FOR READY',
                         icon: Icons.play_arrow,
                         onPressed: canStart ? _startGame : null,
                       )
-                    : Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.primary,
-                              ),
+                    : Column(
+                        children: [
+                          PrimaryButtonLarge(
+                            label: manager.localPlayer?.isReady == true
+                                ? 'READY - TAP TO UNREADY'
+                                : 'TAP WHEN READY',
+                            icon: manager.localPlayer?.isReady == true
+                                ? Icons.check_circle
+                                : Icons.hourglass_empty,
+                            onPressed: () {
+                              final currentPlayer = manager.localPlayer;
+                              if (currentPlayer != null) {
+                                manager.setLocalPlayerReady(
+                                    !currentPlayer.isReady);
+                              }
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Waiting for host to start...',
+                            style: AppTextStyles.bodyMedium.copyWith(
+                              color: AppColors.textMuted,
                             ),
-                            const SizedBox(width: 16),
-                            Text(
-                              'Waiting for host to start...',
-                              style: AppTextStyles.bodyMedium,
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
               ),
             ],
           ),
         ),
+        floatingActionButton: manager.mode == GameMode.offlineP2P
+            ? FloatingActionButton(
+                onPressed: () => _showChatPanel(context, manager),
+                backgroundColor: AppColors.primary,
+                child: Stack(
+                  children: [
+                    const Icon(Icons.chat),
+                    if (manager.lobbyChatMessages.isNotEmpty)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: AppColors.success,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+
+  void _showChatPanel(BuildContext context, GameManager manager) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _ChatPanel(
+        manager: manager,
+        chatController: _chatController,
       ),
     );
   }
@@ -509,7 +613,7 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
             },
             child: Text(
               'Leave',
-              style: TextStyle(color: AppColors.error),
+              style: TextStyle(color: const ui.Color.fromARGB(255, 165, 42, 65)),
             ),
           ),
         ],
@@ -532,7 +636,7 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              context.read<GameManager>().kickLANPlayer(player.id);
+              context.read<GameManager>().kickPlayer(player.id);
             },
             child: Text(
               'Kick',
@@ -541,6 +645,204 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Chat panel widget for lobby chat
+class _ChatPanel extends StatefulWidget {
+  final GameManager manager;
+  final TextEditingController chatController;
+
+  const _ChatPanel({
+    required this.manager,
+    required this.chatController,
+  });
+
+  @override
+  State<_ChatPanel> createState() => _ChatPanelState();
+}
+
+class _ChatPanelState extends State<_ChatPanel> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _sendMessage() {
+    final text = widget.chatController.text.trim();
+    if (text.isNotEmpty) {
+      widget.manager.sendLobbyChatMessage(text);
+      widget.chatController.clear();
+      // Scroll to bottom after sending
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<GameManager>(
+      builder: (context, manager, child) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.6,
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // Handle bar
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textMuted.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // Title
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.chat, color: AppColors.primary),
+                    const SizedBox(width: 12),
+                    Text(
+                      'LOBBY CHAT',
+                      style: AppTextStyles.titleMedium,
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: Icon(Icons.close, color: AppColors.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(color: AppColors.cardBorder, height: 1),
+              // Messages
+              Expanded(
+                child: manager.lobbyChatMessages.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No messages yet.\\nSay hello to your crew!',
+                          textAlign: TextAlign.center,
+                          style: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: manager.lobbyChatMessages.length,
+                        itemBuilder: (context, index) {
+                          final msg = manager.lobbyChatMessages[index];
+                          final isMe = msg.senderId == manager.localPlayerId;
+                          return Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              constraints: BoxConstraints(
+                                maxWidth:
+                                    MediaQuery.of(context).size.width * 0.7,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? AppColors.primary.withOpacity(0.2)
+                                    : AppColors.surface,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (!isMe)
+                                    Text(
+                                      msg.senderName.toUpperCase(),
+                                      style: AppTextStyles.labelSmall.copyWith(
+                                        color: AppColors.primary,
+                                      ),
+                                    ),
+                                  Text(
+                                    msg.text,
+                                    style: AppTextStyles.bodyMedium,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              // Input
+              Container(
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 8,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  border: Border(
+                    top: BorderSide(color: AppColors.cardBorder),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: widget.chatController,
+                        style: AppTextStyles.bodyMedium,
+                        decoration: InputDecoration(
+                          hintText: 'Type a message...',
+                          hintStyle: AppTextStyles.bodyMedium.copyWith(
+                            color: AppColors.textMuted,
+                          ),
+                          filled: true,
+                          fillColor: AppColors.card,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _sendMessage,
+                      icon: Icon(Icons.send, color: AppColors.primary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

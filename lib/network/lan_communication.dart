@@ -116,8 +116,12 @@ class LANCommunication implements GameCommunication {
   Function(RoomInfo)? onRoomDiscovered;
   Function(String playerId, String playerName)? onPlayerJoined;
   Function(String playerId)? onPlayerLeft;
-  Function()? onDisconnectedFromHost;
+  Function(String reason)? onDisconnectedFromHost; // Now includes reason
   Function(String reason)? onJoinRejected;
+  Function(String playerId, bool isReady)? onPlayerReadyChanged; // Ready state
+  Function(String senderId, String senderName, String message)?
+      onChatMessage; // Lobby chat
+  Function(String playerId, String reason)? onPlayerKicked; // Kick notification
 
   // State
   final bool isHost;
@@ -398,6 +402,23 @@ class LANCommunication implements GameCommunication {
         _onAction?.call(message['data'] as Map<String, dynamic>);
         break;
 
+      case 'set_ready':
+        final readyPlayerId = _getPlayerIdFromSocket(socket);
+        if (readyPlayerId != null) {
+          final isReady = message['value'] as bool;
+          onPlayerReadyChanged?.call(readyPlayerId, isReady);
+        }
+        break;
+
+      case 'chat':
+        final chatPlayerId = _getPlayerIdFromSocket(socket);
+        if (chatPlayerId != null) {
+          final text = message['message'] as String? ?? '';
+          final senderName = message['playerName'] as String? ?? 'Unknown';
+          onChatMessage?.call(chatPlayerId, senderName, text);
+        }
+        break;
+
       case 'ping':
         _sendToSocket(socket, {'type': 'pong'});
         break;
@@ -405,6 +426,16 @@ class LANCommunication implements GameCommunication {
       default:
         print('[LAN] Unknown message type from client: $type');
     }
+  }
+
+  /// Get player ID from socket
+  String? _getPlayerIdFromSocket(Socket socket) {
+    for (final entry in _clients.entries) {
+      if (entry.value == socket) {
+        return entry.key;
+      }
+    }
+    return null;
   }
 
   void _handleClientDisconnect(Socket socket) {
@@ -719,13 +750,28 @@ class LANCommunication implements GameCommunication {
         final reason = message['reason'] as String? ?? 'Kicked by host';
         print('[LAN] Kicked: $reason');
         _isConnected = false;
-        onDisconnectedFromHost?.call();
+        onDisconnectedFromHost?.call(reason);
         break;
 
       case 'room_closed':
         print('[LAN] Room closed by host');
         _isConnected = false;
-        onDisconnectedFromHost?.call();
+        onDisconnectedFromHost?.call('Host closed the room');
+        break;
+
+      case 'player_ready':
+        // Host broadcasts ready state changes to all clients
+        final playerId = message['playerId'] as String;
+        final isReady = message['value'] as bool;
+        onPlayerReadyChanged?.call(playerId, isReady);
+        break;
+
+      case 'chat_broadcast':
+        // Host broadcasts chat messages to all clients
+        final senderId = message['senderId'] as String;
+        final senderName = message['senderName'] as String;
+        final text = message['message'] as String;
+        onChatMessage?.call(senderId, senderName, text);
         break;
 
       case 'pong':
@@ -742,7 +788,7 @@ class LANCommunication implements GameCommunication {
     _socketBuffers.remove(_hostSocket);
     _hostSocket = null;
     _isConnected = false;
-    onDisconnectedFromHost?.call();
+    onDisconnectedFromHost?.call('Connection to host lost');
   }
 
   Future<void> leaveRoom() async {
@@ -790,6 +836,52 @@ class LANCommunication implements GameCommunication {
   @override
   void onActionReceived(Function(Map<String, dynamic>) callback) {
     _onAction = callback;
+  }
+
+  // ============ READY STATE ============
+
+  /// Send ready state to host (client only)
+  void sendReadyState(bool isReady) {
+    if (isHost || _hostSocket == null) return;
+    _sendToSocket(_hostSocket!, {
+      'type': 'set_ready',
+      'value': isReady,
+    });
+  }
+
+  /// Broadcast ready state change to all clients (host only)
+  void broadcastReadyState(String playerId, bool isReady) {
+    if (!isHost) return;
+    broadcastToClients({
+      'type': 'player_ready',
+      'playerId': playerId,
+      'value': isReady,
+    });
+  }
+
+  // ============ LOBBY CHAT ============
+
+  /// Send chat message to host (client only)
+  void sendChatMessage(String message, String playerName) {
+    if (isHost) return;
+    if (_hostSocket == null) return;
+    _sendToSocket(_hostSocket!, {
+      'type': 'chat',
+      'message': message,
+      'playerName': playerName,
+    });
+  }
+
+  /// Broadcast chat message to all clients (host only)
+  void broadcastChatMessage(
+      String senderId, String senderName, String message) {
+    if (!isHost) return;
+    broadcastToClients({
+      'type': 'chat_broadcast',
+      'senderId': senderId,
+      'senderName': senderName,
+      'message': message,
+    });
   }
 
   // ============ HELPER ============

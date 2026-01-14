@@ -7,6 +7,7 @@ import '../../models/player.dart';
 import 'widgets/day_night_transition.dart';
 import 'widgets/phase_header.dart';
 import 'widgets/player_tile.dart';
+import 'home_screen.dart';
 
 class GameScreen extends StatefulWidget {
   const GameScreen({super.key});
@@ -27,9 +28,54 @@ class _GameScreenState extends State<GameScreen> {
     super.dispose();
   }
 
+  void _showDisconnectDialog(GameManager manager) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+            SizedBox(width: 12),
+            Text('GAME ENDED', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: Text(
+          manager.disconnectReason ?? 'Host disconnected. The game has ended.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              manager.clearDisconnectState();
+              manager.leaveLANRoom();
+              Navigator.of(ctx).pop();
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const HomeScreen()),
+                (route) => false,
+              );
+            },
+            child: const Text('OK', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final manager = context.watch<GameManager>();
+
+    // Handle host disconnect during game
+    if (manager.wasDisconnected && !manager.isHost) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showDisconnectDialog(manager);
+        }
+      });
+    }
 
     if (_lastPhase != null && _lastPhase != manager.phase) {
       // Trigger transition for specific phase changes
