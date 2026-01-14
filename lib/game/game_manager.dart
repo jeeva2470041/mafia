@@ -1187,6 +1187,9 @@ class GameManager extends ChangeNotifier {
   /// Get host IP address (for host only, to show to players)
   String? get hostIp => _lanComm?.currentRoom?.hostIp;
 
+  /// Get host port (for host only, to show to players)
+  int? get hostPort => _lanComm?.currentRoom?.hostPort;
+
   @override
   void dispose() {
     stopP2P();

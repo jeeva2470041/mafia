@@ -110,7 +110,7 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
   void _showQrDialog(String ip) {
     final qrKey = GlobalKey();
     final manager = context.read<GameManager>();
-    final port = 41235; // Default TCP port
+    final port = manager.hostPort ?? 41235; // Use actual dynamic port
     final pin = manager.roomPin;
     final isPrivate = manager.isRoomPrivate;
     final qrData = _generateQrData(ip, port, pin);
@@ -157,7 +157,7 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
             Text('Scan this QR to join', style: AppTextStyles.bodyMedium),
             const SizedBox(height: 8),
             Text(
-              ip,
+              '$ip:$port',
               style: AppTextStyles.labelSmall.copyWith(
                 color: AppColors.textMuted,
               ),
@@ -332,11 +332,14 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
                             const SizedBox(height: 8),
                             GestureDetector(
                               onTap: () {
+                                final hostAddress =
+                                    '${manager.hostIp}:${manager.hostPort ?? 41235}';
                                 Clipboard.setData(
-                                    ClipboardData(text: manager.hostIp!));
+                                    ClipboardData(text: hostAddress));
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('IP copied to clipboard'),
+                                    content:
+                                        Text('IP:Port copied to clipboard'),
                                     duration: Duration(seconds: 1),
                                   ),
                                 );
@@ -348,7 +351,7 @@ class _LobbyScreenNewState extends State<LobbyScreenNew> {
                                   const SizedBox(width: 4),
                                   Flexible(
                                     child: Text(
-                                      'IP: ${manager.hostIp}',
+                                      '${manager.hostIp}:${manager.hostPort ?? 41235}',
                                       overflow: TextOverflow.ellipsis,
                                       style: AppTextStyles.labelSmall.copyWith(
                                         color: AppColors.textMuted,

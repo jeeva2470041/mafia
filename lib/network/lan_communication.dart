@@ -196,9 +196,10 @@ class LANCommunication implements GameCommunication {
     _roomPin = isPrivate ? pin : null;
 
     try {
-      // Start TCP server first
-      _tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, tcpPort);
-      print('[LAN] TCP server started on port $tcpPort');
+      // Start TCP server with dynamic port (0 = let OS assign available port)
+      _tcpServer = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+      final actualPort = _tcpServer!.port;
+      print('[LAN] TCP server started on dynamic port $actualPort');
 
       _tcpServer!.listen(
         _handleClientConnection,
@@ -218,7 +219,7 @@ class LANCommunication implements GameCommunication {
         hostName: playerName,
         roomName: roomName,
         hostIp: localIp,
-        hostPort: tcpPort,
+        hostPort: actualPort,
         playerCount: 1,
         isPrivate: isPrivate,
       );
@@ -230,7 +231,7 @@ class LANCommunication implements GameCommunication {
 
       _isConnected = true;
       print(
-          '[LAN] Hosting started: ${_currentRoom!.roomName} at $localIp:$tcpPort (private: $isPrivate)');
+          '[LAN] Hosting started: ${_currentRoom!.roomName} at $localIp:$actualPort (private: $isPrivate)');
       return true;
     } catch (e) {
       print('[LAN] Error starting host: $e');
