@@ -1,162 +1,385 @@
-# Mafia Game (Flutter)
+# 🎰 Omerta: City of Deception
 
-:crossed_swords: **Mafia — Offline LAN (UDP/TCP) multiplayer + Solo bots**
+**A Flutter LAN multiplayer Mafia/Werewolf game with AI bots and dynamic networking**
 
-This repository contains a Flutter game that supports local offline multiplayer over LAN (UDP-based room discovery + TCP for reliable game sync) and a solo mode with AI bots.
-
----
-
-## 🔑 Key Features
-
-- Fully offline LAN multiplayer
-  - UDP broadcast discovery (port 41234)
-  - TCP server/client communication (port 41235)
-  - Host-authoritative: host keeps canonical game state and broadcasts state updates
-- Solo mode with AI-controlled bots (no networking required)
-- QR / IP-based join fallback (scan QR or enter host IP to connect directly)
-- Animated in-app splash + native splash (Android/iOS)
-- Cross-platform: Android, Windows (desktop), Web (UI only — LAN not supported in browser)
+A fully offline LAN-based social deduction game supporting multiple simultaneous game rooms with public/private access, QR code sharing, and AI-powered single-player mode.
 
 ---
 
-## 📁 Project structure (important files)
+## ✨ Key Features
 
-- lib/
-  - game/
-    - game_manager.dart — central game state and logic (ChangeNotifier)
-    - bot_controller.dart — bot behavior
-    - game_rules.dart — role setup & win conditions
-  - network/
-    - lan_communication.dart — UDP discovery + TCP client/server implementation
-    - game_communication.dart — interface for communication layer
-  - screens/
-    - home_screen.dart, name_entry_screen.dart, room_discovery_screen.dart, lobby_screen.dart
-    - splash_screen.dart — animated Flutter splash (runs after native splash)
-  - models/
-    - player.dart, game_state.dart
-  - widgets/
-    - room_tile.dart, player_card.dart, etc.
+### **Multiplayer (LAN)**
+- **Multi-room hosting**: Multiple hosts can run simultaneously on the same WiFi (dynamic TCP port allocation)
+- **UDP discovery** (port 41234): Real-time room broadcast with automatic timeout detection
+- **TCP peer-to-peer** (dynamic ports): Host-authoritative game state with reliable JSON messaging
+- **Public & Private Rooms**: 
+  - Public: Anyone can join
+  - Private: 4-digit PIN protection (stored on host only, never broadcast)
+- **QR Code Sharing**: `ip:port|pin` format for easy room access
+- **Manual IP Fallback**: Join by IP address when discovery fails
+- **Player Limits**: 5–10 players per room
 
-- assets/
-  - images/icon.png — app icon (used for launcher & splash)
-  - images/background.png
+### **Solo Mode**
+- AI-controlled bots with strategic gameplay
+- Flexible player count (2–10 total including you)
+- Same roles and win conditions as multiplayer
 
----
+### **UI/UX**
+- Dark crimson theme with smooth animations
+- Animated Flutter splash (after native splash)
+- Mobile-first responsive design
+- Real-time player status and room info
+- Material Design icons and navigation
 
-## 🛠 Development setup
-
-Requirements:
-- Flutter 3.x/4.x SDK
-- Android SDK (for building APK)
-- Windows tooling (if targeting desktop)
-
-Commands:
-
-- Install dependencies
-
-  ```bash
-  flutter pub get
-  ```
-
-- Static analysis
-
-  ```bash
-  flutter analyze
-  ```
-
-- Run (Windows desktop)
-
-  ```bash
-  flutter run -d windows
-  ```
-
-- Run (Android emulator or device)
-
-  ```bash
-  flutter run -d <device-id>
-  ```
-
-- Build release APK (split per ABI)
-
-  ```bash
-  flutter build apk --release --split-per-abi
-  ```
-
-- Build Windows executable
-
-  ```bash
-  flutter build windows --release
-  ```
+### **Cross-Platform**
+- ✅ Android (primary target)
+- ✅ Windows (desktop)
+- ⚠️ Web (UI only — LAN networking disabled)
+- ✅ iOS support (untested)
 
 ---
 
-## 🧭 Networking details (LAN)
+## 🎮 Game Mechanics
 
-- UDP discovery
-  - Host broadcasts a JSON message containing RoomInfo every 2 seconds to UDP port **41234**.
-  - Clients listen on UDP port **41234** and parse broadcasts to show available rooms.
-- TCP communication
-  - Host opens a TCP server on port **41235** and accepts client sockets.
-  - All game actions and state sync use JSON over TCP with line-delimited messages.
-- Fall-back when discovery fails
-  - Manual "Join by IP" dialog
-  - QR Code contains host IP (and optional port) so players can scan and connect
-- Important: Devices must be on the same network (same WiFi/subnet). Firewalls on host machines may block UDP/TCP — temporarily disable or allow the app during testing.
+### **Roles**
+- **Mafia** (killers): Eliminate civilians at night
+- **Civilians** (townspeople): Identify and eliminate mafia during day votes
+- **Sheriff** (optional): Revealed civilian with special voting power
+
+### **Win Conditions**
+- **Civilians Win**: Eliminate all mafia
+- **Mafia Wins**: Match/exceed civilian count
+- **Sheriff Special**: Survives to endgame (rare)
+
+### **Phases**
+1. **Day**: Discussion & voting (civilian majority votes out suspect)
+2. **Night**: Mafia kills a civilian
+3. **Repeat** until one faction wins
+
+---
+
+## 📁 Project Structure
+
+```
+lib/
+├── game/
+│   ├── game_manager.dart      # Central state management (ChangeNotifier)
+│   ├── bot_controller.dart    # AI decision logic
+│   ├── game_rules.dart        # Role assignment, win conditions
+│   └── ...
+├── network/
+│   ├── lan_communication.dart # UDP discovery + TCP p2p (multi-port support)
+│   └── game_communication.dart # Communication interface
+├── models/
+│   ├── game_state.dart        # GamePhase, GameStatus enums
+│   ├── player.dart            # Player role and state
+│   └── ...
+├── screens/
+│   ├── home_screen.dart       # Main menu (Solo / LAN options)
+│   ├── name_entry_screen.dart # Host: room & PIN setup
+│   ├── room_discovery_screen.dart # Client: browse/join rooms
+│   ├── lobby_screen.dart      # Pre-game lobby (host controls, IP:port display)
+│   ├── game_screen.dart       # Game phase UI
+│   ├── splash_screen.dart     # Animated intro (2s duration)
+│   └── ...
+├── widgets/
+│   ├── room_tile.dart         # Room card (with lock icon for private)
+│   ├── player_card.dart       # Player info display
+│   └── ...
+└── assets/
+    ├── images/icon.png        # App icon (used for launcher & splash)
+    └── images/background.png  # Background gradient
+
+pubspec.yaml                   # Dependencies & asset configuration
+```
+
+---
+
+## 🛠 Setup & Development
+
+### **Prerequisites**
+- Flutter SDK 3.0+ (Dart 2.17+)
+- Android SDK (for APK) or Windows SDK (for desktop)
+- Xcode (optional, for iOS)
+
+### **Installation**
+
+```bash
+# Clone and setup
+git clone <repo-url>
+cd mafia
+flutter pub get
+
+# Generate launcher icons and native splash
+flutter pub run flutter_launcher_icons
+flutter pub run flutter_native_splash:create
+
+# Verify setup
+flutter doctor
+```
+
+### **Run**
+
+```bash
+# Android device/emulator
+flutter run -d <device-id>
+
+# Windows desktop
+flutter run -d windows
+
+# Web (UI only, LAN disabled)
+flutter run -d chrome
+```
+
+### **Build**
+
+```bash
+# Android APK (split by architecture)
+flutter build apk --release --split-per-abi
+
+# Output: build/app/outputs/flutter-apk/
+#  - app-armeabi-v7a-release.apk
+#  - app-arm64-v8a-release.apk
+#  - app-x86_64-release.apk
+
+# Windows executable
+flutter build windows --release
+# Output: build/windows/runner/Release/
+```
+
+---
+
+## 🌐 Networking Architecture
+
+### **UDP Discovery (Port 41234)**
+
+**Broadcast Payload** (every 2 seconds from host):
+```json
+{
+  "type": "room_broadcast",
+  "room": {
+    "hostId": "device-uuid",
+    "hostName": "Sam",
+    "roomName": "Mafia Room",
+    "hostIp": "192.168.1.100",
+    "hostPort": 52341,         // Dynamic TCP port
+    "playerCount": 3,
+    "maxPlayers": 10,
+    "inProgress": false,
+    "isPrivate": false
+  }
+}
+```
+
+**Note**: PIN is **NOT broadcast** — it's stored on the host and validated during TCP join only.
+
+### **TCP Communication (Dynamic Ports)**
+
+**Server Binding**:
+- Host: `ServerSocket.bind(anyIPv4, 0)` → OS assigns available port
+- Actual port stored in `RoomInfo.hostPort` and broadcast via UDP
+
+**Client Connection**:
+- Client receives room info (including `hostPort`) from UDP discovery
+- Connects: `Socket.connect(hostIp, hostPort)`
+
+**Message Format** (line-delimited JSON):
+```json
+{"type":"join_request","playerId":"p1","playerName":"Sam","pin":"1234"}
+{"type":"join_accepted","playerId":"p1"}
+{"type":"game_state","phase":"day","..."}
+```
+
+### **Fallback Mechanisms**
+- **Manual IP Entry**: `192.168.1.100:52341` (port optional, defaults to 41235)
+- **QR Code**: Encodes `ip:port|pin` (pin only for private rooms)
+
+### **Multi-Host Support**
+Each host gets a unique dynamic TCP port from the OS, allowing multiple rooms on the same WiFi:
+
+```
+Room 1: 192.168.1.100:52341
+Room 2: 192.168.1.100:52342
+Room 3: 192.168.1.100:52343
+```
+
+---
+
+## 🔒 Security & Privacy
+
+- **Private Rooms**: 4-digit PIN protection
+  - PIN stored locally on host only
+  - Never transmitted in UDP broadcasts
+  - Validated server-side during TCP join
+- **No Authentication**: Relies on LAN isolation (local WiFi only)
+- **No Data Persistence**: Game state cleared after session ends
 
 ---
 
 ## 📱 QR & IP Join
 
-- Host: in the **Lobby** the host's local IP is shown (tap to copy). Tap QR icon to show a QR code containing the IP (e.g., `192.168.1.100` or `192.168.1.100:41235`).
-- Client: in **Find Room** screen, choose "JOIN BY IP ADDRESS" or "SCAN QR". Scanning the QR attempts a direct TCP connect.
+### **Host (Lobby Screen)**
+- Displays: `<ip>:<port>` with copy-to-clipboard
+- QR Icon: Shows encoded QR with `ip:port|pin` format
+- PIN Display: Only shown for private rooms
+
+### **Client (Room Discovery)**
+- **Auto-discover**: UDP broadcasts from same subnet
+- **Join by IP**: Manual entry field accepts:
+  - `192.168.1.100` (uses default port 41235)
+  - `192.168.1.100:52341` (uses specified port)
+- **Scan QR**: Camera-based QR decoder
+  - Public: `192.168.1.100:52341`
+  - Private: `192.168.1.100:52341|1234`
+- **PIN Prompt**: Auto-shown for private rooms
 
 ---
 
-## 🎨 Icon & Splash
+## 🎨 Icon & Splash Screens
 
-- App icon is `assets/images/icon.png` and launcher icons were generated via `flutter_launcher_icons`.
-- Native splash screens were generated with `flutter_native_splash` (color set to #0A0A0A and using the same icon).
-- The Flutter animated splash (`lib/screens/splash_screen.dart`) plays right after native splash and then navigates to the Home screen.
+### **App Icon**
+- Source: `assets/images/icon.png` (square, 1024x1024 recommended)
+- Generated via `flutter_launcher_icons` plugin
+- Adaptive icon support (Android 8+)
+- Background color: `#0A0A0A` (dark)
+
+### **Native Splash**
+- Platform-specific (iOS + Android)
+- Generated via `flutter_native_splash` plugin
+- Color: `#0A0A0A`
+- Shows app icon centered
+
+### **Flutter Animated Splash** (`lib/screens/splash_screen.dart`)
+- Plays immediately after native splash
+- Animations:
+  - Logo: Fade + scale (radial gradient backdrop)
+  - Text: Fade in staggered
+- Duration: 2 seconds total
+- Auto-navigates to Home screen
 
 ---
 
-## ⚙️ Android / iOS permissions
+## ⚙️ Permissions & Configuration
 
-- Android: CAMERA (for QR scan) is declared in AndroidManifest; INTERNET is also required.
-- iOS: NSCameraUsageDescription added to Info.plist.
+### **Android** (AndroidManifest.xml)
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.CAMERA" />
+```
+
+### **iOS** (Info.plist)
+```xml
+<key>NSCameraUsageDescription</key>
+<string>Camera is needed to scan QR codes for room joining</string>
+<key>NSLocalNetworkUsageDescription</key>
+<string>Required for local network device discovery</string>
+<key>NSBonjourServices</key>
+<array>
+  <string>_tcp</string>
+  <string>_udp</string>
+</array>
+```
+
+### **pubspec.yaml** (Asset Configuration)
+```yaml
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+
+flutter_launcher_icons:
+  image_path: "assets/images/icon.png"
+  adaptive_icon_background: "#0A0A0A"
+
+flutter_native_splash:
+  color: "#0A0A0A"
+  image: assets/images/icon.png
+```
 
 ---
 
-## ✅ Testing checklist
+## ✅ Testing Checklist
 
-- [ ] Verify `flutter analyze` shows no errors (only warnings/info about deprecations).
-- [ ] Host on Windows and confirm UDP broadcasts appear (logs show "Hosting started: ... at IP:41235").
-- [ ] On Android device (same WiFi), open Find Room and verify host appears. If not, use "Join by IP" with the host IP.
-- [ ] Test QR scan to confirm it reads IP and connects.
-- [ ] Test solo mode (bots) with different player counts.
+- [ ] `flutter analyze` passes (no errors)
+- [ ] Host Android device & Windows can both run app
+- [ ] Create room on Windows (check logs: "Hosting started at IP:PORT")
+- [ ] Android on same WiFi auto-discovers room within 3 seconds
+- [ ] Join discovered room → Lobby loads with player count
+- [ ] Test private room (PIN entry prompt appears)
+- [ ] QR scan works: `ip:port|pin` encoded correctly
+- [ ] Manual IP join works with and without port
+- [ ] Solo bots game completes (night/day cycle)
+- [ ] Build APK: `flutter build apk --split-per-abi` succeeds
+- [ ] Test on actual Android device (not just emulator)
 
 ---
 
 ## 🐞 Troubleshooting
 
-- No discovery results:
-  - Ensure both devices are on the same WiFi and same subnet (e.g., both 192.168.1.x).
-  - Check host firewall (Windows Defender) settings — allow the app or temporarily disable firewall.
-  - Try the **Join by IP** fallback using the host IP displayed in the lobby.
-- QR scan fails to connect:
-  - Check format `ip` or `ip:port` encoded in QR.
-  - Use manual IP entry as backup.
+### **No Rooms Discovered**
+1. **Same WiFi?** Both devices must be on identical network (e.g., `MyWiFi-5G`)
+2. **Firewall?** Windows Defender may block UDP/TCP:
+   - Temporarily disable OR
+   - Add app to firewall whitelist
+3. **Subnet?** If mixed IPv4/IPv6, ensure both are IPv4 (192.168.x.x)
+4. **Fallback**: Use "Join by IP" with host IP shown in lobby
+
+### **QR Scan Fails**
+- Ensure QR camera permission granted
+- Check QR format: `ip:port` or `ip:port|pin`
+- Use manual IP entry as backup
+
+### **Connection Timeout**
+- Host machine firewall blocking TCP
+- Port in use: Try restarting host
+- Check host logs for bind errors
+
+### **App Crash on Join**
+- Verify host hasn't started game yet
+- Check room isn't full (max 10 players)
+- Re-check PIN for private rooms
 
 ---
 
-## 🧩 Contributing
+## 🚀 Performance & Optimization
 
-1. Fork the repo
-2. Create a feature branch
-3. Add tests where appropriate and ensure `flutter analyze` passes
-4. Open a PR with clear description and testing steps
+- **UDP Broadcast Interval**: 2 seconds (balance discovery vs. network load)
+- **Room Timeout**: 6 seconds (removes stale rooms)
+- **TCP Message Size**: Typically <1KB per message
+- **Player Limit**: 10 max (consensus with game rules)
+- **Icon Tree-Shaking**: Material icons reduced 99% (9KB vs 1.6MB)
 
 ---
+
+## 📝 Code Style & Conventions
+
+- **Language**: Dart with null safety (`<4.0.0`)
+- **State Management**: Provider (ChangeNotifier)
+- **JSON Serialization**: Manual (no code generation)
+- **Naming**: camelCase for variables, PascalCase for classes
+- **Linting**: `flutter_lints` ^2.0.0
+
+---
+
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Ensure `flutter analyze` passes
+5. Push to branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request with testing details
+
+---
+
+## 🔗 Related Resources
+
+- [Flutter Docs](https://flutter.dev/docs)
+- [Socket Networking](https://dart.dev/guides/libraries/io)
+- [Mafia Game Rules](https://en.wikipedia.org/wiki/Mafia_(party_game))
+- [Material Design](https://material.io/)
 
 
 
