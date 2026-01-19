@@ -228,6 +228,7 @@ class GameManager extends ChangeNotifier {
         role: Role.villager, // Will be reassigned
         isBot: true,
         personality: personalities[rng.nextInt(personalities.length)],
+        isReady: true, // bots should start ready in solo games
       ));
     }
 
@@ -290,7 +291,8 @@ class GameManager extends ChangeNotifier {
 
   /// Check if we have enough players and all are ready to start
   bool get canStartGame {
-    if (players.length < 5) return false;
+    // Minimum players required to start is 6 (avoid unbalanced 5-player setups)
+    if (players.length < 6) return false;
     // Check if all non-host players are ready
     return players.every((p) => p.isReady);
   }
@@ -742,6 +744,12 @@ class GameManager extends ChangeNotifier {
       case GamePhase.voting:
         processVotes();
         phase = GamePhase.result;
+        // Let players see the result for a short time before starting the next night
+        Timer(const Duration(seconds: 4), () {
+          if (phase == GamePhase.result && !gameOver) {
+            _startNextRound();
+          }
+        });
         break;
 
       case GamePhase.result:
