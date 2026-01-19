@@ -4,8 +4,9 @@ import '../theme/app_theme.dart';
 import '../widgets/vote_tile.dart';
 import '../widgets/primary_button.dart';
 import '../game/game_manager.dart';
-
-enum GamePhaseType { day, night, voting, discussion }
+import '../models/game_state.dart';
+import '../models/player.dart';
+import 'waiting_screen.dart';
 
 class GameScreenNew extends StatefulWidget {
   const GameScreenNew({super.key});
@@ -15,20 +16,9 @@ class GameScreenNew extends StatefulWidget {
 }
 
 class _GameScreenNewState extends State<GameScreenNew> {
-  GamePhaseType _phase = GamePhaseType.discussion;
-  int _day = 1;
-  int _timeRemaining = 90;
-  String? _selectedVote;
   bool _hasShownDisconnectDialog = false;
-  final List<_PlayerVote> _players = [
-    _PlayerVote('Alex', 2, false),
-    _PlayerVote('Jordan', 0, false),
-    _PlayerVote('Sam', 1, false),
-    _PlayerVote('Riley', 0, true),
-    _PlayerVote('Casey', 3, false),
-  ];
-
-  bool get _hasVoted => _selectedVote != null;
+  String?
+      _seenInspectedPlayerId; // Track detective inspection reveals we've shown
 
   void _showDisconnectDialog(GameManager manager) {
     if (_hasShownDisconnectDialog) return;
@@ -65,8 +55,43 @@ class _GameScreenNewState extends State<GameScreenNew> {
   }
 
   @override
+  void dispose() {
+    final manager = context.read<GameManager>();
+    if (manager.isLANConnected) {
+      manager.leaveLANRoom();
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final manager = context.watch<GameManager>();
+
+    // Detect and show any new inspection results to detective players only (private)
+    if (manager.localPlayer?.role == Role.detective &&
+        manager.lastInspectedPlayerId != null &&
+        manager.lastInspectedPlayerId != _seenInspectedPlayerId) {
+      // Mark seen and show a brief dialog with the result
+      final id = manager.lastInspectedPlayerId!;
+      _seenInspectedPlayerId = id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final res = manager.lastInspectionResult;
+        final name = manager.getPlayerName(id);
+        final text =
+            res == true ? '$name is likely MAFIA' : '$name is not mafia';
+        showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+                  title: const Text('Investigation Result'),
+                  content: Text(text),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('OK'))
+                  ],
+                ));
+      });
+    }
 
     // Handle host disconnect during game
     if (manager.wasDisconnected && !manager.isHost) {
@@ -77,30 +102,40 @@ class _GameScreenNewState extends State<GameScreenNew> {
       });
     }
 
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: _phase == GamePhaseType.night
-                ? [
-                    Colors.indigo.shade900.withOpacity(0.3),
-                    AppColors.background,
-                  ]
-                : [
-                    Colors.orange.withOpacity(0.1),
-                    AppColors.background,
-                  ],
+    return WillPopScope(
+      onWillPop: () async {
+        final manager = context.read<GameManager>();
+        // Disconnect from LAN when leaving the game
+        if (manager.isLANConnected) {
+          manager.leaveLANRoom();
+        }
+        return true;
+      },
+      child: Scaffold(
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: manager.phase == GamePhase.night
+                  ? [
+                      Colors.indigo.shade900.withOpacity(0.3),
+                      AppColors.background,
+                    ]
+                  : [
+                      Colors.orange.withOpacity(0.1),
+                      AppColors.background,
+                    ],
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(),
-              Expanded(child: _buildPhaseContent()),
-              if (_phase == GamePhaseType.voting) _buildVotingFooter(),
-            ],
+          child: SafeArea(
+            child: Column(
+              children: [
+                _buildHeader(),
+                Expanded(child: _buildPhaseContent()),
+                if (manager.phase == GamePhase.voting) _buildVotingFooter(),
+              ],
+            ),
           ),
         ),
       ),
@@ -108,7 +143,8 @@ class _GameScreenNewState extends State<GameScreenNew> {
   }
 
   Widget _buildHeader() {
-    final isNight = _phase == GamePhaseType.night;
+    final manager = context.watch<GameManager>();
+    final isNight = manager.phase == GamePhase.night;
     return Container(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -123,7 +159,9 @@ class _GameScreenNewState extends State<GameScreenNew> {
               Column(
                 children: [
                   Text(
-                    'DAY $_day',
+                    manager.phase == GamePhase.night
+                        ? 'NIGHT ${manager.currentDay}'
+                        : 'DAY ${manager.currentDay}',
                     style: AppTextStyles.labelSmall,
                   ),
                   const SizedBox(height: 4),
@@ -131,6 +169,25 @@ class _GameScreenNewState extends State<GameScreenNew> {
                     _getPhaseName(),
                     style: AppTextStyles.headlineMedium,
                   ),
+                  const SizedBox(height: 4),
+                  Builder(builder: (ctx) {
+                    final manager = ctx.watch<GameManager>();
+                    int? timeLeft;
+                    if (manager.phase == GamePhase.discussion)
+                      timeLeft = manager.discussionSecondsLeft;
+                    if (manager.phase == GamePhase.voting)
+                      timeLeft = manager.votingSecondsLeft;
+                    if (manager.phase == GamePhase.night)
+                      timeLeft = manager.nightSecondsLeft;
+                    if (timeLeft != null && timeLeft > 0) {
+                      return Text(
+                        'Time left: ${_formatTime(timeLeft)}',
+                        style: AppTextStyles.bodyMedium
+                            .copyWith(color: AppColors.textMuted),
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  }),
                 ],
               ),
               IconButton(
@@ -162,13 +219,24 @@ class _GameScreenNewState extends State<GameScreenNew> {
                   color: isNight ? Colors.indigo.shade200 : Colors.orange,
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  _formatTime(_timeRemaining),
-                  style: AppTextStyles.titleMedium.copyWith(
-                    fontFamily: 'monospace',
-                    color: isNight ? Colors.indigo.shade200 : Colors.orange,
-                  ),
-                ),
+                Builder(builder: (ctx) {
+                  final m = ctx.watch<GameManager>();
+                  int displayTime = m.phase == GamePhase.discussion
+                      ? m.discussionSecondsLeft
+                      : m.phase == GamePhase.voting
+                          ? m.votingSecondsLeft
+                          : m.phase == GamePhase.night
+                              ? m.nightSecondsLeft
+                              : 0;
+
+                  return Text(
+                    displayTime > 0 ? _formatTime(displayTime) : '--:--',
+                    style: AppTextStyles.titleMedium.copyWith(
+                      fontFamily: 'monospace',
+                      color: isNight ? Colors.indigo.shade200 : Colors.orange,
+                    ),
+                  );
+                }),
               ],
             ),
           ),
@@ -178,14 +246,16 @@ class _GameScreenNewState extends State<GameScreenNew> {
   }
 
   String _getPhaseName() {
-    switch (_phase) {
-      case GamePhaseType.night:
+    final manager = context.watch<GameManager>();
+    switch (manager.phase) {
+      case GamePhase.night:
         return 'NIGHT';
-      case GamePhaseType.discussion:
+      case GamePhase.discussion:
         return 'DISCUSSION';
-      case GamePhaseType.voting:
+      case GamePhase.voting:
         return 'VOTING';
-      case GamePhaseType.day:
+      case GamePhase.lobby:
+      case GamePhase.result:
       default:
         return 'DAY';
     }
@@ -198,19 +268,59 @@ class _GameScreenNewState extends State<GameScreenNew> {
   }
 
   Widget _buildPhaseContent() {
-    switch (_phase) {
-      case GamePhaseType.voting:
+    final manager = context.watch<GameManager>();
+    switch (manager.phase) {
+      case GamePhase.voting:
         return _buildVotingPhase();
-      case GamePhaseType.discussion:
+      case GamePhase.discussion:
         return _buildDiscussionPhase();
-      case GamePhaseType.night:
+      case GamePhase.night:
         return _buildNightPhase();
+      case GamePhase.result:
+        return _buildResultPhase();
       default:
         return _buildDiscussionPhase();
     }
   }
 
+  Widget _buildResultPhase() {
+    final manager = context.watch<GameManager>();
+    final eliminatedId = manager.lastEliminatedPlayerId;
+
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            eliminatedId != null
+                ? Icons.sentiment_very_dissatisfied
+                : Icons.sentiment_satisfied,
+            size: 80,
+            color: eliminatedId != null ? AppColors.error : AppColors.primary,
+          ),
+          const SizedBox(height: 24),
+          Text(
+            eliminatedId != null
+                ? '${manager.getPlayerName(eliminatedId)} was eliminated'
+                : 'No one was eliminated',
+            style: AppTextStyles.displayMedium,
+          ),
+          const SizedBox(height: 12),
+          if (eliminatedId != null)
+            Text(
+              manager.lastEliminatedRole != null
+                  ? 'Role: ${manager.lastEliminatedRole}'
+                  : '',
+              style:
+                  AppTextStyles.bodyLarge.copyWith(color: AppColors.textMuted),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDiscussionPhase() {
+    final manager = context.watch<GameManager>();
     return Column(
       children: [
         Container(
@@ -251,20 +361,53 @@ class _GameScreenNewState extends State<GameScreenNew> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.1),
+                  color: ((manager.nightKillTargetId != null &&
+                              manager.nightKillSaved != true) ||
+                          manager.lastEliminatedPlayerId != null)
+                      ? AppColors.error.withOpacity(0.1)
+                      : AppColors.surface,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.error.withOpacity(0.3)),
+                  border: Border.all(
+                      color: ((manager.nightKillTargetId != null &&
+                                  manager.nightKillSaved != true) ||
+                              manager.lastEliminatedPlayerId != null)
+                          ? AppColors.error.withOpacity(0.3)
+                          : AppColors.cardBorder),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.dangerous,
-                        color: AppColors.error, size: 20),
+                    Icon(
+                      ((manager.nightKillTargetId != null &&
+                                  manager.nightKillSaved != true) ||
+                              manager.lastEliminatedPlayerId != null)
+                          ? Icons.dangerous
+                          : Icons.info_outline,
+                      color: ((manager.nightKillTargetId != null &&
+                                  manager.nightKillSaved != true) ||
+                              manager.lastEliminatedPlayerId != null)
+                          ? AppColors.error
+                          : AppColors.textSecondary,
+                      size: 20,
+                    ),
                     const SizedBox(width: 12),
-                    Text(
-                      'Riley was eliminated',
-                      style: AppTextStyles.bodyLarge
-                          .copyWith(color: AppColors.error),
+                    Expanded(
+                      child: Text(
+                        manager.nightKillTargetId != null
+                            ? (manager.nightKillSaved == true
+                                ? '${manager.getPlayerName(manager.nightKillTargetId)} was targeted but saved'
+                                : '${manager.getPlayerName(manager.nightKillTargetId)} was eliminated')
+                            : (manager.lastEliminatedPlayerId != null
+                                ? '${manager.getPlayerName(manager.lastEliminatedPlayerId)} was eliminated'
+                                : 'No one was eliminated last night'),
+                        style: AppTextStyles.bodyLarge.copyWith(
+                            color: ((manager.nightKillTargetId != null &&
+                                        manager.nightKillSaved != true) ||
+                                    manager.lastEliminatedPlayerId != null)
+                                ? AppColors.error
+                                : AppColors.textSecondary),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ],
                 ),
@@ -273,7 +416,17 @@ class _GameScreenNewState extends State<GameScreenNew> {
               PrimaryButtonLarge(
                 label: 'PROCEED TO VOTE',
                 icon: Icons.how_to_vote,
-                onPressed: () => setState(() => _phase = GamePhaseType.voting),
+                onPressed: () {
+                  final manager = context.read<GameManager>();
+                  if (manager.isHost) {
+                    manager.advancePhase();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text('Only the host can advance the phase')),
+                    );
+                  }
+                },
               ),
             ],
           ),
@@ -283,21 +436,25 @@ class _GameScreenNewState extends State<GameScreenNew> {
   }
 
   Widget _buildVotingPhase() {
+    final manager = context.watch<GameManager>();
+    final localId = manager.localPlayerId;
+    final alivePlayers = manager.players.where((p) => p.isAlive).toList();
+
     return ListView.separated(
       padding: const EdgeInsets.all(24),
-      itemCount: _players.length,
+      itemCount: alivePlayers.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final player = _players[index];
+        final player = alivePlayers[index];
         return VoteTile(
           playerName: player.name,
-          voteCount: player.votes,
-          isSelected: _selectedVote == player.name,
-          isEliminated: player.eliminated,
+          voteCount: manager.getVoteCount(player.id),
+          isSelected: manager.getUserVote(localId ?? '') == player.id,
+          isEliminated: !player.isAlive,
           onVote: () {
-            setState(() {
-              _selectedVote = player.name;
-            });
+            if (localId != null && player.id != localId) {
+              manager.castVote(localId, player.id);
+            }
           },
         );
       },
@@ -305,6 +462,18 @@ class _GameScreenNewState extends State<GameScreenNew> {
   }
 
   Widget _buildNightPhase() {
+    final manager = context.watch<GameManager>();
+    final local = manager.localPlayer;
+    final canAct = local != null &&
+        local.isAlive &&
+        (local.role == Role.mafia ||
+            local.role == Role.godfather ||
+            local.role == Role.doctor ||
+            local.role == Role.detective ||
+            local.role == Role.vigilante ||
+            local.role == Role.escort ||
+            local.role == Role.serialKiller);
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -326,12 +495,120 @@ class _GameScreenNewState extends State<GameScreenNew> {
             'Close your eyes and wait...',
             style: AppTextStyles.bodyLarge,
           ),
+          const SizedBox(height: 24),
+          if (canAct)
+            PrimaryButtonLarge(
+              label: 'PERFORM NIGHT ACTION',
+              icon: Icons.visibility_off,
+              onPressed: () => _showNightActionDialog(manager, local),
+            ),
         ],
       ),
     );
   }
 
+  void _showNightActionDialog(GameManager manager, Player local) async {
+    // Build role-appropriate target list
+    List<Player> targets;
+    if (local.role == Role.mafia || local.role == Role.godfather) {
+      // Mafia should target non-mafia alive players
+      targets = manager.players
+          .where((p) =>
+              p.isAlive &&
+              p.role != Role.mafia &&
+              p.role != Role.godfather &&
+              p.id != local.id)
+          .toList();
+    } else if (local.role == Role.serialKiller) {
+      // SK can target anyone alive except themselves
+      targets =
+          manager.players.where((p) => p.isAlive && p.id != local.id).toList();
+    } else if (local.role == Role.vigilante) {
+      targets =
+          manager.players.where((p) => p.isAlive && p.id != local.id).toList();
+    } else if (local.role == Role.doctor ||
+        local.role == Role.detective ||
+        local.role == Role.escort) {
+      // Doctor can save anyone, detective/escort can choose alive players (including self for doctor)
+      targets =
+          manager.players.where((p) => p.isAlive && p.id != local.id).toList();
+      // allow doctor to pick themselves
+      if (local.role == Role.doctor) {
+        targets = manager.players.where((p) => p.isAlive).toList();
+      }
+    } else {
+      // Villagers and others have no actions
+      targets = [];
+    }
+
+    if (targets.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('No valid targets')));
+      return;
+    }
+
+    final choice = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Choose target'),
+        children: targets
+            .map((t) => SimpleDialogOption(
+                  onPressed: () => Navigator.of(ctx).pop(t.id),
+                  child: Text(t.name),
+                ))
+            .toList(),
+      ),
+    );
+
+    if (choice == null) return;
+
+    manager.handleNightAction(local.id, choice);
+
+    // Immediate feedback for local roles on host (solo) - else host will broadcast results
+    if (local.role == Role.detective) {
+      // If we're the host, lastInspectionResult will be set immediately
+      final result = manager.lastInspectionResult;
+      final inspectedId = manager.lastInspectedPlayerId;
+      if (inspectedId == choice && result != null) {
+        final name = manager.getPlayerName(inspectedId);
+        final desc = result ? '$name is likely MAFIA' : '$name is not mafia';
+        await showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Investigation Result'),
+            content: Text(desc),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'))
+            ],
+          ),
+        );
+      } else {
+        // If result will be delivered by host later, just inform player
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Investigation submitted')));
+      }
+    }
+
+    if (local.role == Role.mafia || local.role == Role.godfather) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Mafia vote submitted')));
+    }
+
+    // Show waiting screen so player keeps role secret
+    Navigator.pushNamed(context, '/waiting',
+        arguments: {'reason': WaitingReason.nightAction});
+  }
+
   Widget _buildVotingFooter() {
+    final manager = context.watch<GameManager>();
+    final localId = manager.localPlayerId;
+    final selectedId = localId == null ? null : manager.getUserVote(localId);
+    final selectedName = selectedId == null
+        ? null
+        : manager.players.firstWhere((p) => p.id == selectedId).name;
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -342,7 +619,7 @@ class _GameScreenNewState extends State<GameScreenNew> {
       ),
       child: Column(
         children: [
-          if (_hasVoted)
+          if (selectedName != null)
             Container(
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(12),
@@ -357,7 +634,7 @@ class _GameScreenNewState extends State<GameScreenNew> {
                       color: AppColors.primary, size: 18),
                   const SizedBox(width: 8),
                   Text(
-                    'Voting for $_selectedVote',
+                    'Voting for $selectedName',
                     style: AppTextStyles.bodyMedium
                         .copyWith(color: AppColors.primary),
                   ),
@@ -365,22 +642,15 @@ class _GameScreenNewState extends State<GameScreenNew> {
               ),
             ),
           PrimaryButtonLarge(
-            label: _hasVoted ? 'CONFIRM VOTE' : 'SELECT A PLAYER',
-            icon: _hasVoted ? Icons.check : Icons.how_to_vote,
-            onPressed: _hasVoted
-                ? () => Navigator.pushNamed(context, '/waiting')
+            label: selectedName != null ? 'CONFIRM VOTE' : 'SELECT A PLAYER',
+            icon: selectedName != null ? Icons.check : Icons.how_to_vote,
+            onPressed: selectedName != null
+                ? () => Navigator.pushNamed(context, '/waiting',
+                    arguments: {'reason': WaitingReason.voting})
                 : null,
           ),
         ],
       ),
     );
   }
-}
-
-class _PlayerVote {
-  final String name;
-  final int votes;
-  final bool eliminated;
-
-  _PlayerVote(this.name, this.votes, this.eliminated);
 }
